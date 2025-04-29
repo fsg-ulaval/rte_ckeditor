@@ -91,6 +91,8 @@ class RichTextElement extends AbstractFormElement
      */
     public function render(): array
     {
+        $languageService = $this->getLanguageService();
+
         $resultArray = $this->initializeResultArray();
         $parameterArray = $this->data['parameterArray'];
         $config = $parameterArray['fieldConf']['config'];
@@ -98,7 +100,7 @@ class RichTextElement extends AbstractFormElement
         $fieldId = $this->sanitizeFieldId($parameterArray['itemFormElName']);
         $itemFormElementName = $this->data['parameterArray']['itemFormElName'];
 
-        $value = $this->data['parameterArray']['itemFormElValue'] ?? '';
+        $value = $this->data['parameterArray']['itemFormElValue'];
 
         $fieldInformationResult = $this->renderFieldInformation();
         $fieldInformationHtml = $fieldInformationResult['html'];
@@ -116,28 +118,27 @@ class RichTextElement extends AbstractFormElement
         $ckeditorConfiguration = $this->resolveCkEditorConfiguration();
 
         $ckeditorAttributes = GeneralUtility::implodeAttributes([
-            'id' => $fieldId . 'ckeditor5',
-            'options' => GeneralUtility::jsonEncodeForHtmlAttribute($ckeditorConfiguration, false),
-        ], true);
+                                                                    'id' => $fieldId . 'ckeditor5',
+                                                                    'options' => GeneralUtility::jsonEncodeForHtmlAttribute($ckeditorConfiguration, false),
+                                                                ], true);
 
         $textareaAttributes = GeneralUtility::implodeAttributes([
-            'slot' => 'textarea',
-            'id' => $fieldId,
-            'name' => $itemFormElementName,
-            'rows' => '18',
-            'class' => 'form-control',
-            'data-formengine-validation-rules' => $this->getValidationDataAsJsonString($config),
-        ], true);
+                                                                    'slot' => 'textarea',
+                                                                    'id' => $fieldId,
+                                                                    'name' => $itemFormElementName,
+                                                                    'rows' => '18',
+                                                                    'class' => 'form-control',
+                                                                    'data-formengine-validation-rules' => $this->getValidationDataAsJsonString($config),
+                                                                ], true);
 
         $html = [];
-        $html[] = '<div class="formengine-field-item t3js-formengine-field-item">';
         $html[] =   $fieldInformationHtml;
         $html[] =   '<div class="form-control-wrap">';
         $html[] =       '<div class="form-wizards-wrap">';
         $html[] =           '<div class="form-wizards-item-element">';
         $html[] =               '<typo3-rte-ckeditor-ckeditor5 ' . $ckeditorAttributes . '>';
         $html[] =                 '<textarea ' . $textareaAttributes . '>';
-        $html[] =                   htmlspecialchars($value);
+        $html[] =                   htmlspecialchars((string)$value);
         $html[] =                 '</textarea>';
         $html[] =               '</typo3-rte-ckeditor-ckeditor5>';
         $html[] =           '</div>';
@@ -155,9 +156,97 @@ class RichTextElement extends AbstractFormElement
         }
         $html[] =       '</div>';
         $html[] =   '</div>';
-        $html[] = '</div>';
 
-        $resultArray['html'] = $this->wrapWithFieldsetAndLegend(implode(LF, $html));
+        $nullControlNameEscaped = htmlspecialchars('control[active][' . $this->data['tableName'] . '][' . $this->data['databaseRow']['uid'] . '][' . $this->data['fieldName'] . ']');
+
+        $fullElement = $html;
+        if ($this->hasNullCheckboxButNoPlaceholder()) {
+            $checked = $value !== null ? ' checked="checked"' : '';
+            $fullElement = [];
+            $fullElement[] = '<div class="t3-form-field-disable"></div>';
+            $fullElement[] = '<div class="form-check t3-form-field-eval-null-checkbox">';
+            $fullElement[] =     '<input type="hidden" name="' . $nullControlNameEscaped . '" value="0" />';
+            $fullElement[] =     '<input type="checkbox" class="form-check-input" name="' . $nullControlNameEscaped . '" id="' . $nullControlNameEscaped . '" value="1"' . $checked . ' />';
+            $fullElement[] =     '<label class="form-check-label" for="' . $nullControlNameEscaped . '">';
+            $fullElement[] =         $languageService->sL('LLL:EXT:core/Resources/Private/Language/locallang_core.xlf:labels.nullCheckbox');
+            $fullElement[] =     '</label>';
+            $fullElement[] = '</div>';
+            $fullElement[] = implode(LF, $html);
+        } elseif ($this->hasNullCheckboxWithPlaceholder()) {
+            $checked = $value !== null ? ' checked="checked"' : '';
+            $placeholder = $shortenedPlaceholder = $ckeditorConfiguration['placeholder'] ?? '';
+            if ($placeholder !== '') {
+                $shortenedPlaceholder = GeneralUtility::fixed_lgd_cs($placeholder, 20);
+                if ($placeholder !== $shortenedPlaceholder) {
+                    $overrideLabel = sprintf(
+                        $languageService->sL('LLL:EXT:core/Resources/Private/Language/locallang_core.xlf:labels.placeholder.override'),
+                        '<span title="' . htmlspecialchars($placeholder) . '">' . htmlspecialchars($shortenedPlaceholder) . '</span>'
+                    );
+                } else {
+                    $overrideLabel = sprintf(
+                        $languageService->sL('LLL:EXT:core/Resources/Private/Language/locallang_core.xlf:labels.placeholder.override'),
+                        htmlspecialchars($placeholder)
+                    );
+                }
+            } else {
+                $overrideLabel = $languageService->sL(
+                    'LLL:EXT:core/Resources/Private/Language/locallang_core.xlf:labels.placeholder.override_not_available'
+                );
+            }
+
+            $ckeditorConfiguration['readOnly'] = true;
+            $placeholderCkeditorAttributes = GeneralUtility::implodeAttributes(
+                [
+                    'id' => $fieldId . '-placeholder-ckeditor5',
+                    'options' => GeneralUtility::jsonEncodeForHtmlAttribute($ckeditorConfiguration, false),
+                ],
+                true
+            );
+
+            $placeholderTextareaAttributes = GeneralUtility::implodeAttributes(
+                [
+                    'slot' => 'textarea',
+                    'id' => $fieldId . '-placeholder',
+                    'rows' => '18',
+                    'class' => 'form-control',
+                    'data-formengine-validation-rules' => $this->getValidationDataAsJsonString($config),
+                ],
+                true
+            );
+
+            $defaultValue = '';
+            if (isset($config['placeholder'])) {
+                $defaultValue = (string)$config['placeholder'];
+            }
+
+            $fullElement = [];
+            $fullElement[] = '<div class="form-check t3js-form-field-eval-null-placeholder-checkbox">';
+            $fullElement[] =     '<input type="hidden" name="' . $nullControlNameEscaped . '" value="0" />';
+            $fullElement[] =     '<input type="checkbox" class="form-check-input" name="' . $nullControlNameEscaped . '" id="' . $nullControlNameEscaped . '" value="1"' . $checked . ' />';
+            $fullElement[] =     '<label class="form-check-label" for="' . $nullControlNameEscaped . '">';
+            $fullElement[] =         $overrideLabel;
+            $fullElement[] =     '</label>';
+            $fullElement[] = '</div>';
+            $fullElement[] = '<div class="t3js-formengine-placeholder-placeholder">';
+            $fullElement[] =    '<div class="form-control-wrap">';
+            $fullElement[] =        '<typo3-rte-ckeditor-ckeditor5 ' . $placeholderCkeditorAttributes . '>';
+            $fullElement[] =            '<textarea ' . $placeholderTextareaAttributes . '>';
+            $fullElement[] =                htmlspecialchars($defaultValue);
+            $fullElement[] =            '</textarea>';
+            $fullElement[] =        '</typo3-rte-ckeditor-ckeditor5>';
+            $fullElement[] =    '</div>';
+            $fullElement[] = '</div>';
+            $fullElement[] = '<div class="t3js-formengine-placeholder-formfield">';
+            $fullElement[] =    implode(LF, $html);
+            $fullElement[] = '</div>';
+        }
+
+        $fullElement = '
+            <div class="formengine-field-item t3js-formengine-field-item">
+                ' . implode(LF, $fullElement) . '
+            </div>';
+
+        $resultArray['html'] = $this->wrapWithFieldsetAndLegend($fullElement);
         $resultArray['javaScriptModules'][] = JavaScriptModuleInstruction::create('@typo3/rte-ckeditor/ckeditor5.js');
 
         $uiLanguage = $ckeditorConfiguration['language']['ui'];
@@ -215,7 +304,7 @@ class RichTextElement extends AbstractFormElement
             }
         }
         if (isset($this->data['parameterArray']['fieldConf']['config']['placeholder'])) {
-            $configuration['placeholder'] = (string)$this->data['parameterArray']['fieldConf']['config']['placeholder'];
+            $configuration['placeholder'] = strip_tags((string)$this->data['parameterArray']['fieldConf']['config']['placeholder']);
         }
         return $configuration;
     }
